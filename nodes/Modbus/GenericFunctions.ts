@@ -69,15 +69,8 @@ function crc16(buffer: Buffer): Buffer {
 
 class RawModbusClient implements IModbusClient {
 	private socket: net.Socket;
-	private transactionId = 0;
-
 	constructor(socket: net.Socket) {
 		this.socket = socket;
-	}
-
-	private nextId(): number {
-		this.transactionId = (this.transactionId + 1) & 0xffff;
-		return this.transactionId;
 	}
 
 	/**
@@ -256,7 +249,9 @@ class MbapModbusClient implements IModbusClient {
 	}
 
 	destroy(): void {
-		this.inner.destroy();
+		// TCPStream typings don't expose destroy(); cast to reach the underlying socket
+		(this.inner as unknown as { socket?: { destroy(): void }; destroy?(): void })
+			?.socket?.destroy();
 	}
 }
 

@@ -238,7 +238,7 @@ export class Modbus implements INodeType {
 									reject(new NodeOperationError(this.getNode(), 'MODBUS Error: ' + err.message));
 									return;
 								}
-								resolve({ data: data?.response });
+								resolve({ data: data?.response as IDataObject });
 							},
 						);
 					} else {
@@ -249,7 +249,7 @@ export class Modbus implements INodeType {
 									reject(new NodeOperationError(this.getNode(), 'MODBUS Error: ' + err.message));
 									return;
 								}
-								resolve({ data: data?.response });
+								resolve({ data: data?.response as IDataObject });
 							},
 						);
 					}

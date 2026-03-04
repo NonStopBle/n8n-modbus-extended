@@ -164,7 +164,6 @@ export class ModbusTrigger implements INodeType {
 			const extra = { unitId };
 
 			const isRegisterRead = fc === 'readHoldingRegisters' || fc === 'readInputRegisters';
-			const isCoilRead = fc === 'readCoils' || fc === 'readDiscreteInputs';
 			const dataType = isRegisterRead
 				? (this.getNodeParameter('dataType', 'int16') as ModbusDataType)
 				: 'int16'; // unused for coil reads

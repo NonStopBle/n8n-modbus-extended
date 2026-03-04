@@ -14,11 +14,11 @@ export class ModbusApi implements ICredentialType {
 			type: 'options',
 			options: [
 				{
-					name: 'modbus',
+					name: 'Modbus TCP',
 					value: 'tcp',
 				},
 			],
-			default: 'modbus',
+			default: 'tcp',
 		},
 		{
 			displayName: 'Host',
@@ -31,6 +31,16 @@ export class ModbusApi implements ICredentialType {
 			name: 'port',
 			type: 'number',
 			default: 502,
+		},
+		{
+			displayName: 'Enable MBAP Header',
+			name: 'enableMbapHeader',
+			type: 'boolean',
+			default: true,
+			description:
+				'Whether to use standard Modbus TCP framing with the MBAP header. ' +
+				'Disable this for devices that use raw Modbus RTU-over-TCP (no MBAP wrapper), ' +
+				'such as serial-to-Ethernet converters in transparent/passthrough mode.',
 		},
 	];
 }

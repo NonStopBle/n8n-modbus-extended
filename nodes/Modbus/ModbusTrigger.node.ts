@@ -7,8 +7,13 @@ import type {
 	IRun,
 } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
-import { createClient, extractModbusData, type ModbusCredential } from './GenericFunctions';
-import { TCPStream } from 'modbus-stream';
+import {
+	createClient,
+	extractModbusData,
+	type IModbusClient,
+	type ModbusCredential,
+	registerCount,
+} from './GenericFunctions';
 import { ModbusDataType } from './types';
 
 interface Options {
@@ -37,7 +42,7 @@ export class ModbusTrigger implements INodeType {
 					"<b>While building your workflow</b>, click the 'listen' button, then trigger an MODBUS event. This will trigger an execution, which will show up in this editor.<br /> <br /><b>Your workflow will also execute automatically</b>, since it's activated. Every time a change is detected, this node will trigger an execution. These executions will show up in the <a data-key='executions'>executions list</a>, but not in the editor.",
 			},
 			activationHint:
-				"Once you’ve finished building your workflow, <a data-key='activate'>activate</a> it to have it also listen continuously (you just won’t see those executions here).",
+				"Once you've finished building your workflow, <a data-key='activate'>activate</a> it to have it also listen continuously (you just won't see those executions here).",
 		},
 		inputs: [],
 		//@ts-ignore
@@ -68,30 +73,12 @@ export class ModbusTrigger implements INodeType {
 				name: 'dataType',
 				type: 'options',
 				options: [
-					{
-						name: 'Signed 16-Bit Integer',
-						value: 'int16',
-					},
-					{
-						name: 'Signed 32-Bit Integer',
-						value: 'int32',
-					},
-					{
-						name: 'Signed 64-Bit Big-Integer',
-						value: 'int64',
-					},
-					{
-						name: 'Unsigned 16-Bit Integer',
-						value: 'uint16',
-					},
-					{
-						name: 'Unsigned 32-Bit Integer',
-						value: 'uint32',
-					},
-					{
-						name: 'Unsigned 64-Bit Big-Integer',
-						value: 'uint64',
-					},
+					{ name: 'Signed 16-Bit Integer', value: 'int16' },
+					{ name: 'Signed 32-Bit Integer', value: 'int32' },
+					{ name: 'Signed 64-Bit Big-Integer', value: 'int64' },
+					{ name: 'Unsigned 16-Bit Integer', value: 'uint16' },
+					{ name: 'Unsigned 32-Bit Integer', value: 'uint32' },
+					{ name: 'Unsigned 64-Bit Big-Integer', value: 'uint64' },
 				],
 				default: 'int16',
 				noDataExpression: true,
@@ -123,29 +110,30 @@ export class ModbusTrigger implements INodeType {
 
 	async trigger(this: ITriggerFunctions): Promise<ITriggerResponse> {
 		let poller: NodeJS.Timeout;
-		let client: TCPStream;
+		let client: IModbusClient;
 
 		try {
 			const credentials = await this.getCredentials<ModbusCredential>('modbusApi');
 			const memoryAddress = this.getNodeParameter('memoryAddress') as number;
-			const unitId = this.getNodeParameter('unitId', 1);
+			const unitId = this.getNodeParameter('unitId', 1) as number;
 			const dataType = this.getNodeParameter('dataType', 'int16') as ModbusDataType;
 			const quantity = this.getNodeParameter('quantity') as number;
 			const polling = this.getNodeParameter('polling') as number;
 			const options = this.getNodeParameter('options') as Options;
 
-			// Parse the memory address as an integer
 			if (isNaN(memoryAddress)) {
 				throw new NodeOperationError(this.getNode(), 'Memory address must be a valid number.');
 			}
 
-			// Connect to the MODBUS TCP device
 			client = await createClient(credentials);
 
 			const compareBuffers = (buf1?: Buffer[], buf2?: Buffer[]) => {
 				if (!buf1 || !buf2 || buf1.length !== buf2.length) return false;
 				return buf1.every((b, i) => b.equals(buf2[i]));
 			};
+
+			// The real register quantity to request (accounts for multi-register types)
+			const registerQuantity = quantity * registerCount(dataType);
 
 			if (this.getMode() === 'trigger') {
 				const donePromise = !options.parallelProcessing
@@ -154,10 +142,9 @@ export class ModbusTrigger implements INodeType {
 
 				let previousData: Buffer[] | undefined;
 
-				// Start polling for changes
 				poller = setInterval(() => {
 					client.readHoldingRegisters(
-						{ address: memoryAddress, quantity, extra: { unitId } },
+						{ address: memoryAddress, quantity: registerQuantity, extra: { unitId } },
 						(err, data) => {
 							if (err) {
 								clearInterval(poller);
@@ -188,32 +175,38 @@ export class ModbusTrigger implements INodeType {
 					let previousData: Buffer[] | undefined;
 
 					poller = setInterval(() => {
-						client.readHoldingRegisters({ address: memoryAddress, quantity }, (err, data) => {
-							if (err) {
-								clearInterval(poller);
-								reject(new NodeOperationError(this.getNode(), err.message));
-								return;
-							}
-
-							if (!compareBuffers(previousData, data?.response.data) || cycle === 0) {
-								previousData = data?.response.data;
-								if (cycle > 0) {
-									const returnData: IDataObject = {
-										data: previousData?.map((value) => value.readInt16BE(0)),
-									};
-									this.emit([this.helpers.returnJsonArray([returnData])]);
+						client.readHoldingRegisters(
+							{ address: memoryAddress, quantity: registerQuantity, extra: { unitId } },
+							(err, data) => {
+								if (err) {
 									clearInterval(poller);
-									resolve();
+									reject(new NodeOperationError(this.getNode(), err.message));
+									return;
 								}
-								cycle++;
-							}
-						});
+
+								if (!compareBuffers(previousData, data?.response.data) || cycle === 0) {
+									previousData = data?.response.data;
+									if (cycle > 0) {
+										const returnData: IDataObject = {
+											data: previousData
+												? extractModbusData(this.getNode(), previousData, dataType)
+												: undefined,
+										};
+										this.emit([this.helpers.returnJsonArray([returnData])]);
+										clearInterval(poller);
+										resolve();
+									}
+									cycle++;
+								}
+							},
+						);
 					}, polling);
 				});
 			};
 
 			const closeFunction = async () => {
 				clearInterval(poller);
+				client.destroy();
 			};
 
 			return {
